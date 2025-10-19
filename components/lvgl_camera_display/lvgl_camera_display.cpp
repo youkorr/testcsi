@@ -24,46 +24,28 @@ void LVGLCameraDisplay::setup() {
 
 void LVGLCameraDisplay::loop() {
   uint32_t now = millis();
-  
-  // Vérifier si c'est le moment de mettre à jour
+
   if (now - this->last_update_ < this->update_interval_) {
     return;
   }
-  
+
   this->last_update_ = now;
-  
-  // Vérifier que l'objet image est configuré
-  if (this->img_obj_ == nullptr) {
-    if (!this->canvas_warning_shown_) {
-      ESP_LOGW(TAG, "❌ Image object non configuré - utilisez on_boot pour appeler configure_canvas()");
-      this->canvas_warning_shown_ = true;
-    }
+
+  if (this->img_obj_ == nullptr || !this->camera_->is_streaming()) {
     return;
   }
-  
-  // Si la caméra est en streaming, capturer ET mettre à jour l'image
-  if (this->camera_->is_streaming()) {
-    bool frame_captured = this->camera_->capture_frame();
-    
-    if (frame_captured) {
-      this->update_canvas_();
-      this->frame_count_++;
-      
-      // Logger FPS réel toutes les 100 frames
-      if (this->frame_count_ % 100 == 0) {
-        static uint32_t last_time = 0;
-        uint32_t now_time = millis();
-        if (last_time > 0) {
-          float elapsed = (now_time - last_time) / 1000.0f;
-          float fps = 100.0f / elapsed;
-          ESP_LOGI(TAG, "🎞️  Frames: %u - FPS moyen: %.2f - Dropped: %u", 
-                   this->frame_count_, fps, this->dropped_frames_);
-        }
-        last_time = now_time;
-      }
-    } else {
-      this->dropped_frames_++;
-    }
+
+  bool frame_captured = this->camera_->capture_frame();
+
+  if (frame_captured) {
+    // Juste mettre à jour le pointeur du buffer
+    uint8_t* img_data = this->camera_->get_image_data();
+    this->img_dsc_.data = img_data;
+
+   // Ne pas appeler lv_img_set_src() à chaque frame
+   // LVGL le détecte automatiquement
+
+    this->frame_count_++;
   }
 }
 
