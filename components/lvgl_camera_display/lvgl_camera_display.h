@@ -37,7 +37,7 @@ class LVGLCameraDisplay : public Component {
   uint16_t target_height_{0};
   bool use_scaling_{false};
   
-  uint32_t update_interval_{20};  // 50 FPS par défaut
+  uint32_t update_interval_{10};  
   uint32_t last_update_{0};
   
   // Statistiques
