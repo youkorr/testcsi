@@ -556,10 +556,20 @@ bool MipiDsiCam::capture_frame() {
   return was_ready;
 }
 void MipiDsiCam::loop() {
-  if (this->streaming_) {
-    // Mise à jour Auto Exposure
+  if (!this->streaming_) {
+    return;
+  }
+  
+  // Réduire la fréquence des mises à jour pour libérer du CPU
+  this->loop_counter_++;
+  
+  // Auto Exposure - mise à jour toutes les 10 loops seulement
+  if (this->loop_counter_ % 10 == 0) {
     this->update_auto_exposure_();
-    
+  }
+  
+  // Statistiques FPS - toutes les 100 loops
+  if (this->loop_counter_ % 100 == 0) {
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
     
@@ -582,6 +592,11 @@ void MipiDsiCam::loop() {
       ready_count = 0;
       not_ready_count = 0;
     }
+  }
+  
+  // Céder du temps CPU aux autres tâches
+  if (this->loop_counter_ % 5 == 0) {
+    vTaskDelay(1);  // Céder 1ms toutes les 5 loops
   }
 }
 
