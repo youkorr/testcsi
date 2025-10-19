@@ -1,6 +1,7 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "../mipi_dsi_cam/mipi_dsi_cam.h"
 
 namespace esphome {
 namespace lvgl_camera_display {
