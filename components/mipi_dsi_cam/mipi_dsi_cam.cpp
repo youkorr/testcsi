@@ -274,8 +274,8 @@ bool MipiDsiCam::init_isp_() {
 void MipiDsiCam::configure_white_balance_() {
   if (!this->isp_handle_) return;
   
-  // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
-  if (this->sensor_type_ == "ov5647" || this->sensor_type_ == "sc202cs") {
+
+  if (this->sensor_type_ == "sc202cs") {
     ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé (correction logicielle uniquement)", 
              this->sensor_type_.c_str());
     return;
