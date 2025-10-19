@@ -1,3 +1,6 @@
+import json
+import os
+
 SENSOR_INFO = {
     'name': 'sc202cs',
     'manufacturer': 'SmartSens',
@@ -22,7 +25,67 @@ REGISTERS = {
     'exposure_m': 0x3e01,
     'exposure_l': 0x3e02,
     'flip_mirror': 0x3221,
+    # AWB registers
+    'awb_gain_r_h': 0x3c00,
+    'awb_gain_r_l': 0x3c01,
+    'awb_gain_g_h': 0x3c02,
+    'awb_gain_g_l': 0x3c03,
+    'awb_gain_b_h': 0x3c04,
+    'awb_gain_b_l': 0x3c05,
 }
+
+# Charger les paramètres depuis le fichier JSON si disponible
+def load_config():
+    config = {}
+    try:
+        # Chercher le fichier JSON dans le même répertoire
+        json_path = os.path.join(os.path.dirname(__file__), 'sc202cs_default.json')
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+                if 'SC202CS' in data:
+                    config = data['SC202CS']
+                    print(f"Loaded SC202CS config from {json_path}")
+    except Exception as e:
+        print(f"Could not load JSON config: {e}")
+    return config
+
+CONFIG = load_config()
+
+# Extraire les paramètres importants du JSON
+AWB_CONFIG = CONFIG.get('awb', {})
+AGC_CONFIG = CONFIG.get('agc', {})
+ACC_CONFIG = CONFIG.get('acc', {})
+
+# Matrice CCM par défaut ou depuis le JSON
+CCM_MATRIX = [1.408, -0.094, -0.314,
+              -0.13,  1.28,  -0.15,
+              -0.072, -0.173, 1.245]
+
+if ACC_CONFIG and 'ccm' in ACC_CONFIG and 'table' in ACC_CONFIG['ccm']:
+    ccm_table = ACC_CONFIG['ccm']['table']
+    if ccm_table and len(ccm_table) > 0:
+        CCM_MATRIX = ccm_table[0].get('matrix', CCM_MATRIX)
+
+# Paramètres AWB depuis le JSON
+AWB_TARGET_RG_MIN = 0.573
+AWB_TARGET_RG_MAX = 0.9096
+AWB_TARGET_BG_MIN = 0.5368
+AWB_TARGET_BG_MAX = 0.9634
+
+if AWB_CONFIG and 'range' in AWB_CONFIG:
+    range_config = AWB_CONFIG['range']
+    if 'rg' in range_config:
+        AWB_TARGET_RG_MIN = range_config['rg'].get('min', AWB_TARGET_RG_MIN)
+        AWB_TARGET_RG_MAX = range_config['rg'].get('max', AWB_TARGET_RG_MAX)
+    if 'bg' in range_config:
+        AWB_TARGET_BG_MIN = range_config['bg'].get('min', AWB_TARGET_BG_MIN)
+        AWB_TARGET_BG_MAX = range_config['bg'].get('max', AWB_TARGET_BG_MAX)
+
+# Target luma pour AGC depuis le JSON
+AGC_TARGET_LUMA = 65
+if AGC_CONFIG and 'luma_adjust' in AGC_CONFIG:
+    AGC_TARGET_LUMA = AGC_CONFIG['luma_adjust'].get('target', AGC_TARGET_LUMA)
 
 INIT_SEQUENCE = [
     (0x0103, 0x01, 10),
@@ -149,7 +212,7 @@ INIT_SEQUENCE = [
     (0x393d, 0x01, 0),
     (0x393e, 0xc0, 0),
     (0x39dd, 0x41, 0),
-    # Exposition initiale modérée pour AE
+    # Exposition initiale basée sur le JSON si disponible
     (0x3e00, 0x00, 0),
     (0x3e01, 0x9c, 0),  # 0x9C0 = exposition moyenne
     (0x3e02, 0x00, 0),
@@ -256,6 +319,24 @@ namespace {SENSOR_INFO['name']}_regs {{
     cpp_code += f'''
 }}
 
+// Paramètres AWB depuis le fichier JSON
+struct SC202CSAWBConfig {{
+    float rg_min = {AWB_TARGET_RG_MIN}f;
+    float rg_max = {AWB_TARGET_RG_MAX}f;
+    float bg_min = {AWB_TARGET_BG_MIN}f;
+    float bg_max = {AWB_TARGET_BG_MAX}f;
+}};
+
+// Matrice de correction des couleurs depuis le JSON
+static const float sc202cs_ccm_matrix[9] = {{
+    {CCM_MATRIX[0]}f, {CCM_MATRIX[1]}f, {CCM_MATRIX[2]}f,
+    {CCM_MATRIX[3]}f, {CCM_MATRIX[4]}f, {CCM_MATRIX[5]}f,
+    {CCM_MATRIX[6]}f, {CCM_MATRIX[7]}f, {CCM_MATRIX[8]}f
+}};
+
+// Target luma pour AGC
+static const uint8_t SC202CS_AGC_TARGET_LUMA = {AGC_TARGET_LUMA};
+
 struct {SENSOR_INFO['name'].upper()}InitRegister {{
     uint16_t addr;
     uint8_t value;
@@ -291,7 +372,17 @@ public:
     {SENSOR_INFO['name'].upper()}Driver(esphome::i2c::I2CDevice* i2c) : i2c_(i2c) {{}}
     
     esp_err_t init() {{
-        ESP_LOGI(TAG, "Init {SENSOR_INFO['name'].upper()} - AWB matériel désactivé, correction logicielle uniquement");
+        ESP_LOGI(TAG, "Init {SENSOR_INFO['name'].upper()} avec paramètres JSON");
+        ESP_LOGI(TAG, "  CCM Matrix: %.3f %.3f %.3f", 
+                 sc202cs_ccm_matrix[0], sc202cs_ccm_matrix[1], sc202cs_ccm_matrix[2]);
+        ESP_LOGI(TAG, "              %.3f %.3f %.3f", 
+                 sc202cs_ccm_matrix[3], sc202cs_ccm_matrix[4], sc202cs_ccm_matrix[5]);
+        ESP_LOGI(TAG, "              %.3f %.3f %.3f", 
+                 sc202cs_ccm_matrix[6], sc202cs_ccm_matrix[7], sc202cs_ccm_matrix[8]);
+        ESP_LOGI(TAG, "  AWB Range: RG[%.3f-%.3f] BG[%.3f-%.3f]", 
+                 awb_config_.rg_min, awb_config_.rg_max,
+                 awb_config_.bg_min, awb_config_.bg_max);
+        ESP_LOGI(TAG, "  AGC Target Luma: %d", SC202CS_AGC_TARGET_LUMA);
         
         for (size_t i = 0; i < sizeof({SENSOR_INFO['name']}_init_sequence) / sizeof({SENSOR_INFO['name'].upper()}InitRegister); i++) {{
             const auto& reg = {SENSOR_INFO['name']}_init_sequence[i];
@@ -307,7 +398,7 @@ public:
             }}
         }}
         
-        ESP_LOGI(TAG, "✅ {SENSOR_INFO['name'].upper()} initialized");
+        ESP_LOGI(TAG, "✅ {SENSOR_INFO['name'].upper()} initialized with JSON config");
         return ESP_OK;
     }}
     
@@ -364,6 +455,29 @@ public:
         return ret;
     }}
     
+    // Nouvelle méthode pour ajuster la balance des blancs
+    esp_err_t set_awb_gains(uint16_t r_gain, uint16_t g_gain, uint16_t b_gain) {{
+        esp_err_t ret = ESP_OK;
+        
+        // Écrire les gains R/G/B dans les registres AWB
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_R_H, (r_gain >> 8) & 0xFF);
+        if (ret != ESP_OK) return ret;
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_R_L, r_gain & 0xFF);
+        if (ret != ESP_OK) return ret;
+        
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_G_H, (g_gain >> 8) & 0xFF);
+        if (ret != ESP_OK) return ret;
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_G_L, g_gain & 0xFF);
+        if (ret != ESP_OK) return ret;
+        
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_B_H, (b_gain >> 8) & 0xFF);
+        if (ret != ESP_OK) return ret;
+        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_B_L, b_gain & 0xFF);
+        
+        ESP_LOGV(TAG, "AWB gains set: R=%d G=%d B=%d", r_gain, g_gain, b_gain);
+        return ret;
+    }}
+    
     esp_err_t write_register(uint16_t reg, uint8_t value) {{
         uint8_t data[3] = {{
             static_cast<uint8_t>((reg >> 8) & 0xFF),
@@ -371,7 +485,7 @@ public:
             value
         }};
         
-        auto err = i2c_->write_read(data, 3, nullptr, 0); // new write
+        auto err = i2c_->write_read(data, 3, nullptr, 0);
         if (err != esphome::i2c::ERROR_OK) {{
             ESP_LOGE(TAG, "I2C write failed for reg 0x%04X", reg);
             return ESP_FAIL;
@@ -385,9 +499,7 @@ public:
             static_cast<uint8_t>(reg & 0xFF)
         }};
         
-        auto err = i2c_->write_read(addr, 2, value, 1); 
-                                                       
-                                                       
+        auto err = i2c_->write_read(addr, 2, value, 1);
         if (err != esphome::i2c::ERROR_OK) {{
             ESP_LOGE(TAG, "I2C cmd failed for reg 0x%04X", reg);
             return ESP_FAIL;
@@ -396,8 +508,14 @@ public:
         return ESP_OK;
     }}
     
+    // Getters pour les paramètres AWB
+    const SC202CSAWBConfig& get_awb_config() const {{ return awb_config_; }}
+    const float* get_ccm_matrix() const {{ return sc202cs_ccm_matrix; }}
+    uint8_t get_agc_target_luma() const {{ return SC202CS_AGC_TARGET_LUMA; }}
+    
 private:
     esphome::i2c::I2CDevice* i2c_;
+    SC202CSAWBConfig awb_config_;
     static constexpr const char* TAG = "{SENSOR_INFO['name'].upper()}";
 }};
 
@@ -405,7 +523,7 @@ class {SENSOR_INFO['name'].upper()}Adapter : public ISensorDriver {{
 public:
     {SENSOR_INFO['name'].upper()}Adapter(i2c::I2CDevice* i2c) : driver_(i2c) {{}}
     
-    const char* get_name() const override {{ return "{SENSOR_INFO['name']}"; }}
+    const char* get_name() const override {{ return "{SENSOR_INFO['name']} (JSON config)"; }}
     uint16_t get_pid() const override {{ return 0x{SENSOR_INFO['pid']:04X}; }}
     uint8_t get_i2c_address() const override {{ return 0x{SENSOR_INFO['i2c_address']:02X}; }}
     uint8_t get_lane_count() const override {{ return {SENSOR_INFO['lane_count']}; }}
