@@ -482,7 +482,79 @@ uint32_t MipiDsiCam::calculate_brightness_() {
   
   return sample_count > 0 ? (sum / sample_count) : 128;
 }
+void MipiDsiCam::apply_software_ccm_(uint8_t* buffer, size_t size) {
+  if (!buffer || this->sensor_type_ != "sc202cs") {
+    return;
+  }
+  
+  // Matrice CCM du JSON pour SC202CS
+  const float ccm[9] = {
+    1.408f,  -0.094f, -0.314f,
+    -0.13f,   1.28f,  -0.15f,
+    -0.072f, -0.173f,  1.245f
+  };
+  
+  // Gains de base pour corriger la dominante verte
+  const float r_gain = 1.3f;
+  const float g_gain = 0.85f;  // Réduire le vert
+  const float b_gain = 1.2f;
+  
+  // Parcourir le buffer RGB565
+  for (size_t i = 0; i < size; i += 2) {
+    uint16_t pixel = (buffer[i+1] << 8) | buffer[i];
+    
+    // Extraire R, G, B de RGB565
+    float r = ((pixel >> 11) & 0x1F) * 8.225f;  // 5 bits -> 0-255
+    float g = ((pixel >> 5) & 0x3F) * 4.047f;   // 6 bits -> 0-255
+    float b = (pixel & 0x1F) * 8.225f;           // 5 bits -> 0-255
+    
+    // Appliquer les gains AWB
+    r *= r_gain;
+    g *= g_gain;
+    b *= b_gain;
+    
+    // Appliquer la matrice CCM
+    float r_new = ccm[0] * r + ccm[1] * g + ccm[2] * b;
+    float g_new = ccm[3] * r + ccm[4] * g + ccm[5] * b;
+    float b_new = ccm[6] * r + ccm[7] * g + ccm[8] * b;
+    
+    // Saturer les valeurs
+    r_new = std::max(0.0f, std::min(255.0f, r_new));
+    g_new = std::max(0.0f, std::min(255.0f, g_new));
+    b_new = std::max(0.0f, std::min(255.0f, b_new));
+    
+    // Reconvertir en RGB565
+    uint16_t r565 = ((uint16_t)(r_new / 8.225f)) & 0x1F;
+    uint16_t g565 = ((uint16_t)(g_new / 4.047f)) & 0x3F;
+    uint16_t b565 = ((uint16_t)(b_new / 8.225f)) & 0x1F;
+    
+    uint16_t new_pixel = (r565 << 11) | (g565 << 5) | b565;
+    
+    buffer[i] = new_pixel & 0xFF;
+    buffer[i+1] = (new_pixel >> 8) & 0xFF;
+  }
+}
 
+// Modifiez capture_frame() pour appliquer la correction :
+bool MipiDsiCam::capture_frame() {
+  if (!this->streaming_) {
+    return false;
+  }
+  
+  bool was_ready = this->frame_ready_;
+  if (was_ready) {
+    this->frame_ready_ = false;
+    uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
+    this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
+    
+    // Appliquer la correction CCM pour SC202CS
+    if (this->sensor_type_ == "sc202cs") {
+      this->apply_software_ccm_(this->current_frame_buffer_, this->frame_buffer_size_);
+    }
+  }
+  
+  return was_ready;
+}
 void MipiDsiCam::loop() {
   if (this->streaming_) {
     // Mise à jour Auto Exposure
