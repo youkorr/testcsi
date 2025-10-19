@@ -3,7 +3,8 @@
 #include "esphome/core/application.h"
 
 #include "mipi_dsi_cam_drivers_generated.h"
-#include "sc202cs_params.h"  // 🔥 Paramètres configurables
+#include "sc202cs_params.h"
+#include "software_wb.h"  // 🆕 White Balance software
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -18,7 +19,7 @@ namespace mipi_dsi_cam {
 static const char *const TAG = "mipi_dsi_cam";
 
 void MipiDsiCam::setup() {
-  ESP_LOGI(TAG, "Init MIPI Camera (low latency + sc202cs_params)");
+  ESP_LOGI(TAG, "Init MIPI Camera (low latency + WB software)");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
   
   // 🔥 Charger paramètres depuis sc202cs_params.h
@@ -30,10 +31,17 @@ void MipiDsiCam::setup() {
   this->wb_green_gain_ = sc202cs_params::WB_GREEN_GAIN;
   this->wb_blue_gain_ = sc202cs_params::WB_BLUE_GAIN;
   
+  // 🆕 Créer l'objet WB software
+  this->wb_processor_ = new SoftwareWhiteBalance(
+    this->wb_red_gain_, 
+    this->wb_green_gain_, 
+    this->wb_blue_gain_
+  );
+  
   ESP_LOGI(TAG, "🔥 SC202CS Params:");
   ESP_LOGI(TAG, "   Exposure: 0x%04X (%d)", this->current_exposure_, this->current_exposure_);
   ESP_LOGI(TAG, "   Gain: %d", this->current_gain_index_);
-  ESP_LOGI(TAG, "   WB: R=%.2f G=%.2f B=%.2f", 
+  ESP_LOGI(TAG, "   WB Software: R=%.2f G=%.2f B=%.2f", 
            this->wb_red_gain_, this->wb_green_gain_, this->wb_blue_gain_);
   ESP_LOGI(TAG, "   AE: %s, target=%d", 
            this->auto_exposure_enabled_ ? "ON" : "OFF", this->ae_target_brightness_);
@@ -112,7 +120,7 @@ void MipiDsiCam::setup() {
   );
   
   this->initialized_ = true;
-  ESP_LOGI(TAG, "✅ Camera ready (%ux%u) - Triple buffering + Async AE", 
+  ESP_LOGI(TAG, "✅ Camera ready (%ux%u) - Triple buffering + WB Software + Async AE", 
            this->width_, this->height_);
 }
 
@@ -314,14 +322,19 @@ bool MipiDsiCam::init_isp_() {
 void MipiDsiCam::configure_white_balance_() {
   if (!this->isp_handle_) return;
   
-  // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
+  // 🆕 CORRECTION: Pour SC202CS et OV5647, on utilise WB software au lieu de matériel
   if (this->sensor_type_ == "ov5647" || this->sensor_type_ == "sc202cs") {
-    ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé", this->sensor_type_.c_str());
+    ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé → WB Software activé", 
+             this->sensor_type_.c_str());
     ESP_LOGI(TAG, "   Utilisation WB logiciel: R=%.2f G=%.2f B=%.2f",
              this->wb_red_gain_, this->wb_green_gain_, this->wb_blue_gain_);
+    
+    // 🔥 Le WB sera appliqué dans capture_frame() via wb_processor_
+    this->use_software_wb_ = true;
     return;
   }
   
+  // Pour les autres sensors, tenter AWB matériel
   esp_isp_awb_config_t awb_config = {};
   awb_config.sample_point = ISP_AWB_SAMPLE_POINT_AFTER_CCM;
   awb_config.window.top_left.x = this->width_ / 4;
@@ -334,8 +347,10 @@ void MipiDsiCam::configure_white_balance_() {
   if (ret == ESP_OK && this->awb_ctlr_ != nullptr) {
     esp_isp_awb_controller_enable(this->awb_ctlr_);
     ESP_LOGI(TAG, "✅ AWB matériel activé");
+    this->use_software_wb_ = false;
   } else {
-    ESP_LOGW(TAG, "AWB matériel non disponible (0x%x)", ret);
+    ESP_LOGW(TAG, "AWB matériel non disponible (0x%x) → WB Software", ret);
+    this->use_software_wb_ = true;
   }
 }
 
@@ -447,7 +462,7 @@ bool MipiDsiCam::stop_streaming() {
   return true;
 }
 
-// capture_frame optimisé - swap atomique avec le display buffer
+// capture_frame optimisé - swap atomique avec le display buffer + WB software
 bool MipiDsiCam::capture_frame() {
   if (!this->streaming_) {
     return false;
@@ -462,6 +477,19 @@ bool MipiDsiCam::capture_frame() {
   uint8_t ready_idx = this->ready_buffer_index_.load(std::memory_order_acquire);
   this->display_buffer_ = this->frame_buffers_[ready_idx];
   this->display_buffer_ready_.store(false, std::memory_order_release);
+  
+  // 🆕 CORRECTION: Appliquer WB software si activé
+  if (this->use_software_wb_ && this->wb_processor_ && this->display_buffer_) {
+    // Appliquer WB seulement toutes les 2 frames pour économiser du CPU
+    // Si vous voulez encore plus de FPS, changez à % 3 ou % 4
+    if (this->frame_number_.load() % 2 == 0) {
+      this->wb_processor_->apply_to_buffer(
+        this->display_buffer_, 
+        this->width_, 
+        this->height_
+      );
+    }
+  }
   
   return true;
 }
@@ -496,7 +524,7 @@ void MipiDsiCam::update_auto_exposure_() {
   }
   
   uint32_t now = millis();
-  if (now - this->last_ae_update_ < sc202cs_params::AE_UPDATE_INTERVAL_MS) {  // 🔥 Depuis params
+  if (now - this->last_ae_update_ < sc202cs_params::AE_UPDATE_INTERVAL_MS) {
     return;
   }
   this->last_ae_update_ = now;
@@ -504,16 +532,16 @@ void MipiDsiCam::update_auto_exposure_() {
   uint32_t avg_brightness = this->calculate_brightness_();
   int32_t error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
   
-  if (abs(error) > sc202cs_params::AE_ADJUSTMENT_THRESHOLD) {  // 🔥 Depuis params
+  if (abs(error) > sc202cs_params::AE_ADJUSTMENT_THRESHOLD) {
     bool changed = false;
     
     if (error > 0) {
       // Image trop sombre
       if (this->current_exposure_ < sc202cs_params::MAX_EXPOSURE) {
-        this->current_exposure_ += sc202cs_params::AE_EXPOSURE_STEP;  // 🔥 Depuis params
+        this->current_exposure_ += sc202cs_params::AE_EXPOSURE_STEP;
         changed = true;
       } else if (this->current_gain_index_ < sc202cs_params::MAX_GAIN_INDEX) {
-        this->current_gain_index_ += sc202cs_params::AE_GAIN_STEP;  // 🔥 Depuis params
+        this->current_gain_index_ += sc202cs_params::AE_GAIN_STEP;
         changed = true;
       }
     } else {
@@ -573,9 +601,10 @@ void MipiDsiCam::loop() {
     if (now - this->last_frame_log_time_ >= 3000) {
       float fps = this->total_frames_received_ / 3.0f;
       
-      ESP_LOGI(TAG, "📸 FPS: %.1f | frames: %u | exp:0x%04X gain:%u", 
+      ESP_LOGI(TAG, "📸 FPS: %.1f | frames: %u | exp:0x%04X gain:%u | WB:%s", 
                fps, this->frame_number_.load(), 
-               this->current_exposure_, this->current_gain_index_);
+               this->current_exposure_, this->current_gain_index_,
+               this->use_software_wb_ ? "SW" : "HW");
       
       this->total_frames_received_ = 0;
       this->last_frame_log_time_ = now;
@@ -584,7 +613,7 @@ void MipiDsiCam::loop() {
 }
 
 void MipiDsiCam::dump_config() {
-  ESP_LOGCONFIG(TAG, "MIPI Camera (Low Latency):");
+  ESP_LOGCONFIG(TAG, "MIPI Camera (Low Latency + WB Software):");
   if (this->sensor_driver_) {
     ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_driver_->get_name());
   }
@@ -592,6 +621,8 @@ void MipiDsiCam::dump_config() {
   ESP_LOGCONFIG(TAG, "  Buffering: Triple (3 buffers)");
   ESP_LOGCONFIG(TAG, "  Auto Exposure: %s (async)", 
                 this->auto_exposure_enabled_ ? "ON" : "OFF");
+  ESP_LOGCONFIG(TAG, "  White Balance: %s", 
+                this->use_software_wb_ ? "Software" : "Hardware");
   ESP_LOGCONFIG(TAG, "  Config: sc202cs_params.h");
 }
 
@@ -646,7 +677,13 @@ void MipiDsiCam::set_white_balance_gains(float r, float g, float b) {
   this->wb_red_gain_ = r;
   this->wb_green_gain_ = g;
   this->wb_blue_gain_ = b;
-  ESP_LOGI(TAG, "WB gains: R=%.2f G=%.2f B=%.2f", r, g, b);
+  
+  // 🆕 Mettre à jour l'objet WB processor
+  if (this->wb_processor_) {
+    this->wb_processor_->set_gains(r, g, b);
+  }
+  
+  ESP_LOGI(TAG, "🎨 WB gains updated: R=%.2f G=%.2f B=%.2f", r, g, b);
 }
 
 }  // namespace mipi_dsi_cam
