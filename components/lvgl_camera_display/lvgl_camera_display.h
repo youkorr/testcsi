@@ -41,7 +41,11 @@ class LVGLCameraDisplay : public Component {
   // Suivi du pointeur de buffer pour éviter les appels inutiles
   uint8_t* last_buffer_ptr_{nullptr};
 
-  void update_canvas_();
+  // 🚀 Version optimisée du update canvas
+  void update_canvas_fast_();
+  
+  // Ancienne version (gardée pour compatibilité si besoin)
+  void update_canvas_() { update_canvas_fast_(); }
 };
 
 }  // namespace lvgl_camera_display
