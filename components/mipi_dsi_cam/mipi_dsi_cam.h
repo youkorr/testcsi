@@ -150,7 +150,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   
   // White Balance correction
   float wb_red_gain_{1.3f};
-  float wb_green_gain_{0.9f};
+  float wb_green_gain_{0.7f};
   float wb_blue_gain_{1.1f};
   
 #ifdef USE_ESP32_VARIANT_ESP32P4
