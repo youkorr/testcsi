@@ -8,7 +8,7 @@ namespace lvgl_camera_display {
 static const char *const TAG = "lvgl_camera_display";
 
 void LVGLCameraDisplay::setup() {
-  ESP_LOGCONFIG(TAG, "🎥 LVGL Camera Display (Low Latency Mode)");
+  ESP_LOGCONFIG(TAG, "🎥 LVGL Camera Display (Ultra Low Latency)");
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "❌ Camera not configured");
@@ -16,24 +16,23 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // 🔧 Pas besoin de update_interval en mode event-driven
-  ESP_LOGI(TAG, "✅ Display initialized (event-driven mode)");
+  ESP_LOGI(TAG, "✅ Display initialized (zero-copy mode)");
 }
 
 void LVGLCameraDisplay::loop() {
-  // 🆕 Mode event-driven: on check seulement si une nouvelle frame est disponible
+  // Mode event-driven ultra-optimisé
   if (!this->camera_->is_streaming()) {
     return;
   }
   
-  // 🔧 Vérifier si nouvelle frame disponible (non-bloquant, atomique)
+  // Vérifier si nouvelle frame (atomique, non-bloquant)
   if (!this->camera_->has_new_frame()) {
-    return;  // Pas de nouvelle frame, ne rien faire
+    return;
   }
   
-  // 🆕 Capturer la frame (swap de buffer atomique)
+  // Capturer la frame (swap atomique)
   if (this->camera_->capture_frame()) {
-    this->update_canvas_();
+    this->update_canvas_fast_();
     this->frame_count_++;
 
     // Logger FPS réel toutes les 100 frames
@@ -52,11 +51,12 @@ void LVGLCameraDisplay::loop() {
 
 void LVGLCameraDisplay::dump_config() {
   ESP_LOGCONFIG(TAG, "LVGL Camera Display:");
-  ESP_LOGCONFIG(TAG, "  Mode: Event-driven (zero-copy)");
+  ESP_LOGCONFIG(TAG, "  Mode: Zero-copy + Direct invalidation");
   ESP_LOGCONFIG(TAG, "  Canvas: %s", this->canvas_obj_ ? "YES" : "NO");
 }
 
-void LVGLCameraDisplay::update_canvas_() {
+// 🚀 VERSION ULTRA-OPTIMISÉE - Évite tout redraw inutile
+void LVGLCameraDisplay::update_canvas_fast_() {
   if (this->camera_ == nullptr || this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
       ESP_LOGW(TAG, "❌ Canvas null");
@@ -80,18 +80,26 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // 🔧 CRITIQUE: Ne PAS appeler lv_canvas_set_buffer à chaque frame si le buffer ne change pas
-  // Le buffer est maintenant stable (triple buffering), donc on peut juste invalider
-  
-  // 🆕 Première fois ou si le buffer a changé: set_buffer
+  // 🔥 CRITIQUE: Ne JAMAIS appeler lv_canvas_set_buffer à chaque frame !
+  // On le fait SEULEMENT si le pointeur change ou au premier update
   if (this->last_buffer_ptr_ != img_data) {
-    // Verrouillage LVGL pour thread-safety
     lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
     this->last_buffer_ptr_ = img_data;
+    
+    // Forcer un redraw complet seulement au changement de buffer
+    lv_obj_invalidate(this->canvas_obj_);
+  } else {
+    // 🚀 OPTIMISATION CRITIQUE: Invalider SEULEMENT la zone image
+    // Évite de redessiner les widgets autour
+    lv_area_t area;
+    area.x1 = lv_obj_get_x(this->canvas_obj_);
+    area.y1 = lv_obj_get_y(this->canvas_obj_);
+    area.x2 = area.x1 + width - 1;
+    area.y2 = area.y1 + height - 1;
+    
+    // Invalider uniquement la zone du canvas
+    lv_obj_invalidate_area(this->canvas_obj_, &area);
   }
-  
-  // 🔧 Invalider seulement la zone nécessaire (plus rapide que tout l'écran)
-  lv_obj_invalidate(this->canvas_obj_);
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
@@ -103,8 +111,17 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Canvas size: %dx%d", w, h);
     
-    // 🆕 Désactiver le cache de transformation si disponible pour réduire la latence
+    // 🚀 Optimisations LVGL pour performance maximale
     lv_obj_clear_flag(canvas, LV_OBJ_FLAG_SCROLLABLE);
+    
+    // 🔥 CRITIQUE: Désactiver le cache et le blending pour le canvas
+    lv_obj_set_style_bg_opa(canvas, LV_OPA_TRANSP, 0);  // Pas de fond
+    lv_obj_set_style_border_width(canvas, 0, 0);        // Pas de bordure (on la met ailleurs)
+    lv_obj_set_style_pad_all(canvas, 0, 0);             // Pas de padding
+    
+    // Désactiver les animations
+    lv_obj_clear_flag(canvas, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(canvas, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   }
 }
 
