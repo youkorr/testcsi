@@ -406,6 +406,11 @@ bool MipiDsiCam::capture_frame() {
     this->frame_ready_ = false;
     uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
     this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
+    
+    // Appliquer la correction CCM pour SC202CS
+    if (this->sensor_type_ == "sc202cs") {
+      this->apply_software_ccm_(this->current_frame_buffer_, this->frame_buffer_size_);
+    }
   }
   
   return was_ready;
@@ -535,26 +540,6 @@ void MipiDsiCam::apply_software_ccm_(uint8_t* buffer, size_t size) {
   }
 }
 
-// Modifiez capture_frame() pour appliquer la correction :
-bool MipiDsiCam::capture_frame() {
-  if (!this->streaming_) {
-    return false;
-  }
-  
-  bool was_ready = this->frame_ready_;
-  if (was_ready) {
-    this->frame_ready_ = false;
-    uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
-    this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
-    
-    // Appliquer la correction CCM pour SC202CS
-    if (this->sensor_type_ == "sc202cs") {
-      this->apply_software_ccm_(this->current_frame_buffer_, this->frame_buffer_size_);
-    }
-  }
-  
-  return was_ready;
-}
 void MipiDsiCam::loop() {
   if (!this->streaming_) {
     return;
