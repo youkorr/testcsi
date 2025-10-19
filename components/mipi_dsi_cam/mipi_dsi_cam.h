@@ -152,7 +152,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   // White Balance (sera init depuis sc202cs_params)
   float wb_red_gain_{1.4f};
   float wb_green_gain_{0.7f};
-  float wb_blue_gain_{1.2f};
+  float wb_blue_gain_{1.9f};
   
 #ifdef USE_ESP32_VARIANT_ESP32P4
   esp_cam_ctlr_handle_t csi_handle_{nullptr};
