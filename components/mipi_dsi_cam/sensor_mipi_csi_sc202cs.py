@@ -214,7 +214,7 @@ INIT_SEQUENCE = [
     (0x39dd, 0x41, 0),
     # Exposition initiale basée sur le JSON si disponible
     (0x3e00, 0x00, 0),
-    (0x3e01, 0x9c, 0),  # 0x9C0 = exposition moyenne
+    (0x3e01, 0x4d, 0),  # 0x9C0 = exposition moyenne
     (0x3e02, 0x00, 0),
     # Gain initial modéré
     (0x3e07, 0xa0, 0),  # digital fine
