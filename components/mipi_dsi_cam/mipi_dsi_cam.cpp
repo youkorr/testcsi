@@ -200,8 +200,8 @@ bool MipiDsiCam::init_csi_() {
   csi_config.h_res = this->width_;
   csi_config.v_res = this->height_;
   csi_config.lane_bit_rate_mbps = this->lane_bitrate_mbps_;
-  csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
-  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
+  //csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
+  //csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = this->lane_count_;
   csi_config.byte_swap_en = false;
   csi_config.queue_items = 10;
@@ -242,7 +242,7 @@ bool MipiDsiCam::init_isp_() {
   isp_config.clk_src = ISP_CLK_SRC_DEFAULT;
   isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
   isp_config.input_data_color_type = ISP_COLOR_RAW8;
-  isp_config.output_data_color_type = ISP_COLOR_RAW8;
+  isp_config.output_data_color_type = ISP_COLOR_RGB565;
   isp_config.h_res = this->width_;
   isp_config.v_res = this->height_;
   isp_config.has_line_start_packet = false;
