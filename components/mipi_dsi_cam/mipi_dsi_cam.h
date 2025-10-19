@@ -99,7 +99,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   uint8_t sensor_address_{0x36};
   uint8_t lane_count_{1};
   uint8_t bayer_pattern_{0};
-  uint16_t lane_bitrate_mbps_{800};
+  uint16_t lane_bitrate_mbps_{576};
   uint16_t width_{1280};
   uint16_t height_{720};
   
