@@ -4,6 +4,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/components/i2c/i2c.h"
 #include <string>
+#include <atomic>
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 extern "C" {
@@ -68,12 +69,16 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
 
+  // 🔧 API modifiée pour gérer la latence
   bool capture_frame();
+  bool has_new_frame() const { return this->display_buffer_ready_.load(); }
+  uint32_t get_frame_number() const { return this->frame_number_.load(); }
+  
   bool start_streaming();
   bool stop_streaming();
   bool is_streaming() const { return this->streaming_; }
   
-  uint8_t* get_image_data() { return this->current_frame_buffer_; }
+  uint8_t* get_image_data() { return this->display_buffer_; }
   size_t get_image_size() const { return this->frame_buffer_size_; }
   uint16_t get_image_width() const { return this->width_; }
   uint16_t get_image_height() const { return this->height_; }
@@ -110,24 +115,38 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
 
   bool initialized_{false};
   bool streaming_{false};
-  bool frame_ready_{false};
+  
+  // 🆕 Triple buffering avec atomics pour éviter les race conditions
+  static constexpr size_t NUM_BUFFERS = 3;
+  uint8_t *frame_buffers_[NUM_BUFFERS]{nullptr, nullptr, nullptr};
+  std::atomic<uint8_t> capture_buffer_index_{0};  // Buffer CSI écrit dedans
+  std::atomic<uint8_t> ready_buffer_index_{1};    // Buffer prêt à afficher
+  uint8_t *display_buffer_{nullptr};              // Buffer affiché
+  
+  std::atomic<bool> display_buffer_ready_{false};
+  std::atomic<uint32_t> frame_number_{0};
+  
+  size_t frame_buffer_size_{0};
   
   uint32_t total_frames_received_{0};
   uint32_t last_frame_log_time_{0};
   
-  uint8_t *frame_buffers_[2]{nullptr, nullptr};
-  uint8_t *current_frame_buffer_{nullptr};
-  size_t frame_buffer_size_{0};
-  uint8_t buffer_index_{0};
-  
   ISensorDriver *sensor_driver_{nullptr};
 
-  // Auto Exposure
-  bool auto_exposure_enabled_{false};
+  // Auto Exposure - déporté dans une tâche séparée
+  bool auto_exposure_enabled_{true};
   uint16_t current_exposure_{0x9C0};
   uint8_t current_gain_index_{20};
   uint32_t ae_target_brightness_{128};
   uint32_t last_ae_update_{0};
+  
+  // 🆕 File pour les commandes AE asynchrones
+  struct AECommand {
+    uint16_t exposure;
+    uint8_t gain;
+  };
+  QueueHandle_t ae_command_queue_{nullptr};
+  TaskHandle_t ae_task_handle_{nullptr};
   
   // White Balance correction
   float wb_red_gain_{1.3f};
@@ -152,6 +171,9 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void update_auto_exposure_();
   uint32_t calculate_brightness_();
   
+  // 🆕 Tâche AE asynchrone
+  static void ae_task_(void* param);
+  
   static bool IRAM_ATTR on_csi_new_frame_(
     esp_cam_ctlr_handle_t handle,
     esp_cam_ctlr_trans_t *trans,
@@ -165,8 +187,6 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   );
 #endif
   void apply_software_ccm_(uint8_t* buffer, size_t size);
-  //uint32_t loop_counter_{0};
-
 };
 
 }  // namespace mipi_dsi_cam
