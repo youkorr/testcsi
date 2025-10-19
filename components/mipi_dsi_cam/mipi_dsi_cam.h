@@ -8,8 +8,7 @@
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 extern "C" {
-  #include "esp_cam_ctlr.h"
-  #include "esp_cam_ctlr_csi.h"
+  #include "esp_video_init.h"  // 🆕 esp_video API
   #include "driver/isp.h"
   #include "esp_ldo_regulator.h"
 }
@@ -18,15 +17,13 @@ extern "C" {
 namespace esphome {
 namespace mipi_dsi_cam {
 
-// Forward declaration
-class SoftwareWhiteBalance;
-
 enum PixelFormat {
   PIXEL_FORMAT_RGB565 = 0,
   PIXEL_FORMAT_YUV422 = 1,
   PIXEL_FORMAT_RAW8 = 2,
 };
 
+// Interface pour les drivers de capteurs
 class ISensorDriver {
 public:
   virtual ~ISensorDriver() = default;
@@ -72,9 +69,10 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
 
+  // API pour gérer la caméra
   bool capture_frame();
-  bool has_new_frame() const { return this->display_buffer_ready_.load(); }
-  uint32_t get_frame_number() const { return this->frame_number_.load(); }
+  bool has_new_frame() const { return this->display_buffer_ != nullptr; }
+  uint32_t get_frame_number() const { return this->frame_number_; }
   
   bool start_streaming();
   bool stop_streaming();
@@ -87,11 +85,11 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   
   bool has_external_clock() const { return this->external_clock_pin_ >= 0; }
 
+  // Contrôle AE
   void set_auto_exposure(bool enabled);
   void set_ae_target_brightness(uint8_t target);
   void set_manual_exposure(uint16_t exposure);
   void set_manual_gain(uint8_t gain_index);
-  void set_white_balance_gains(float red, float green, float blue);
   void adjust_exposure(uint16_t exposure_value);
   void adjust_gain(uint8_t gain_index);
   void set_brightness_level(uint8_t level);
@@ -117,22 +115,17 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   bool initialized_{false};
   bool streaming_{false};
   
-  static constexpr size_t NUM_BUFFERS = 3;
-  uint8_t *frame_buffers_[NUM_BUFFERS]{nullptr, nullptr, nullptr};
-  std::atomic<uint8_t> capture_buffer_index_{0};
-  std::atomic<uint8_t> ready_buffer_index_{1};
+  // Buffer géré par esp_video
   uint8_t *display_buffer_{nullptr};
-  
-  std::atomic<bool> display_buffer_ready_{false};
-  std::atomic<uint32_t> frame_number_{0};
-  
   size_t frame_buffer_size_{0};
+  uint32_t frame_number_{0};
   
   uint32_t total_frames_received_{0};
   uint32_t last_frame_log_time_{0};
   
   ISensorDriver *sensor_driver_{nullptr};
 
+  // Auto Exposure
   bool auto_exposure_enabled_{false};
   uint16_t current_exposure_{0x07DC};
   uint8_t current_gain_index_{0};
@@ -146,44 +139,21 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   QueueHandle_t ae_command_queue_{nullptr};
   TaskHandle_t ae_task_handle_{nullptr};
   
-  // 🆕 White Balance software
-  float wb_red_gain_{1.4f};
-  float wb_green_gain_{0.7f};
-  float wb_blue_gain_{1.9f};
-  bool use_software_wb_{false};
-  SoftwareWhiteBalance* wb_processor_{nullptr};
-  
 #ifdef USE_ESP32_VARIANT_ESP32P4
-  esp_cam_ctlr_handle_t csi_handle_{nullptr};
+  esp_video_handle_t video_handle_{nullptr};  // 🆕 Handle esp_video
   isp_proc_handle_t isp_handle_{nullptr};
-  esp_ldo_channel_handle_t ldo_handle_{nullptr};
   isp_awb_ctlr_t awb_ctlr_{nullptr};
   
   bool create_sensor_driver_();
   bool init_sensor_();
   bool init_external_clock_();
-  bool init_ldo_();
-  bool init_csi_();
-  bool init_isp_();
-  bool allocate_buffer_();
+  bool init_esp_video_pipeline_();  // 🆕 Remplace init_ldo/csi/isp
   
-  void configure_white_balance_();
+  void configure_isp_features_();
   void update_auto_exposure_();
   uint32_t calculate_brightness_();
   
   static void ae_task_(void* param);
-  
-  static bool IRAM_ATTR on_csi_new_frame_(
-    esp_cam_ctlr_handle_t handle,
-    esp_cam_ctlr_trans_t *trans,
-    void *user_data
-  );
-  
-  static bool IRAM_ATTR on_csi_frame_done_(
-    esp_cam_ctlr_handle_t handle,
-    esp_cam_ctlr_trans_t *trans,
-    void *user_data
-  );
 #endif
 };
 
