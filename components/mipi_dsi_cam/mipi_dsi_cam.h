@@ -149,7 +149,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   TaskHandle_t ae_task_handle_{nullptr};
   
   // White Balance correction
-  float wb_red_gain_{1.4f};
+  float wb_red_gain_{1.9f};
   float wb_green_gain_{0.4f};
   float wb_blue_gain_{1.2f};
   
