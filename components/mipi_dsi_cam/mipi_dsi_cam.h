@@ -164,6 +164,9 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
     void *user_data
   );
 #endif
+  void apply_software_ccm_(uint8_t* buffer, size_t size);
+  uint32_t loop_counter_{0};
+
 };
 
 }  // namespace mipi_dsi_cam
