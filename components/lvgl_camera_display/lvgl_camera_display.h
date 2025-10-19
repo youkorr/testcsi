@@ -2,7 +2,13 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
-#include "../mipi_dsi_cam/mipi_dsi_cam.h"
+
+// Forward declaration pour éviter les dépendances circulaires
+namespace esphome {
+namespace mipi_dsi_cam {
+  class MipiDsiCam;
+}
+}
 
 namespace esphome {
 namespace lvgl_camera_display {
