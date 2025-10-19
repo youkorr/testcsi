@@ -2,13 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
-
-// Forward declaration pour éviter les dépendances circulaires
-namespace esphome {
-namespace mipi_dsi_cam {
-  class MipiDsiCam;
-}
-}
+#include "../mipi_dsi_cam/mipi_dsi_cam.h"
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -47,11 +41,7 @@ class LVGLCameraDisplay : public Component {
   // Suivi du pointeur de buffer pour éviter les appels inutiles
   uint8_t* last_buffer_ptr_{nullptr};
 
-  // 🚀 Version optimisée du update canvas
-  void update_canvas_fast_();
-  
-  // Ancienne version (gardée pour compatibilité si besoin)
-  void update_canvas_() { update_canvas_fast_(); }
+  void update_canvas_();
 };
 
 }  // namespace lvgl_camera_display
