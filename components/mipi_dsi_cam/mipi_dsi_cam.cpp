@@ -3,7 +3,7 @@
 #include "esphome/core/application.h"
 
 #include "mipi_dsi_cam_drivers_generated.h"
-#include "sc202cs_params.h"  // 🔥 Paramètres configurables
+#include "sc202cs_params.h"
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -21,7 +21,6 @@ void MipiDsiCam::setup() {
   ESP_LOGI(TAG, "Init MIPI Camera (low latency + sc202cs_params)");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
   
-  // 🔥 Charger paramètres depuis sc202cs_params.h
   this->current_exposure_ = sc202cs_params::DEFAULT_EXPOSURE;
   this->current_gain_index_ = sc202cs_params::DEFAULT_GAIN_INDEX;
   this->ae_target_brightness_ = sc202cs_params::AE_TARGET_BRIGHTNESS;
@@ -92,7 +91,6 @@ void MipiDsiCam::setup() {
     return;
   }
   
-  // Créer la file de commandes AE
   this->ae_command_queue_ = xQueueCreate(4, sizeof(AECommand));
   if (!this->ae_command_queue_) {
     ESP_LOGE(TAG, "AE queue creation failed");
@@ -100,15 +98,14 @@ void MipiDsiCam::setup() {
     return;
   }
   
-  // Démarrer la tâche AE asynchrone (priorité basse)
   xTaskCreatePinnedToCore(
     ae_task_,
     "ae_task",
     3072,
     this,
-    1,  // Priorité basse pour ne pas perturber l'affichage
+    1,
     &this->ae_task_handle_,
-    0   // Core 0 (CSI/ISP sur core 1)
+    0
   );
   
   this->initialized_ = true;
@@ -314,7 +311,6 @@ bool MipiDsiCam::init_isp_() {
 void MipiDsiCam::configure_white_balance_() {
   if (!this->isp_handle_) return;
   
-  // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
   if (this->sensor_type_ == "ov5647" || this->sensor_type_ == "sc202cs") {
     ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé", this->sensor_type_.c_str());
     ESP_LOGI(TAG, "   Utilisation WB logiciel: R=%.2f G=%.2f B=%.2f",
@@ -342,7 +338,6 @@ void MipiDsiCam::configure_white_balance_() {
 bool MipiDsiCam::allocate_buffer_() {
   this->frame_buffer_size_ = this->width_ * this->height_ * 2;
   
-  // Allouer 3 buffers au lieu de 2
   for (int i = 0; i < NUM_BUFFERS; i++) {
     this->frame_buffers_[i] = (uint8_t*)heap_caps_aligned_alloc(
       64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
@@ -354,13 +349,12 @@ bool MipiDsiCam::allocate_buffer_() {
     }
   }
   
-  this->display_buffer_ = this->frame_buffers_[2];  // Buffer initial d'affichage
+  this->display_buffer_ = this->frame_buffers_[2];
   
   ESP_LOGI(TAG, "Buffers: 3x%u bytes (triple buffering)", this->frame_buffer_size_);
   return true;
 }
 
-// ISR optimisé avec triple buffering
 bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
   esp_cam_ctlr_handle_t handle,
   esp_cam_ctlr_trans_t *trans,
@@ -368,7 +362,6 @@ bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
 ) {
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
-  // Donner le buffer de capture au CSI
   uint8_t idx = cam->capture_buffer_index_.load(std::memory_order_relaxed);
   trans->buffer = cam->frame_buffers_[idx];
   trans->buflen = cam->frame_buffer_size_;
@@ -376,7 +369,6 @@ bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
   return false;
 }
 
-// ISR optimisé - swap atomique des buffers
 bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   esp_cam_ctlr_handle_t handle,
   esp_cam_ctlr_trans_t *trans,
@@ -385,11 +377,9 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
   if (trans->received_size > 0) {
-    // Rotation atomique: capture -> ready, ready -> capture
     uint8_t old_capture = cam->capture_buffer_index_.load(std::memory_order_acquire);
     uint8_t old_ready = cam->ready_buffer_index_.load(std::memory_order_acquire);
     
-    // Swap capture <-> ready (le 3ème buffer reste pour l'affichage)
     cam->ready_buffer_index_.store(old_capture, std::memory_order_release);
     cam->capture_buffer_index_.store(old_ready, std::memory_order_release);
     
@@ -447,18 +437,15 @@ bool MipiDsiCam::stop_streaming() {
   return true;
 }
 
-// capture_frame optimisé - swap atomique avec le display buffer
 bool MipiDsiCam::capture_frame() {
   if (!this->streaming_) {
     return false;
   }
   
-  // Vérifier s'il y a une nouvelle frame
   if (!this->display_buffer_ready_.load(std::memory_order_acquire)) {
     return false;
   }
   
-  // Swap atomique: ready -> display
   uint8_t ready_idx = this->ready_buffer_index_.load(std::memory_order_acquire);
   this->display_buffer_ = this->frame_buffers_[ready_idx];
   this->display_buffer_ready_.store(false, std::memory_order_release);
@@ -466,7 +453,6 @@ bool MipiDsiCam::capture_frame() {
   return true;
 }
 
-// Tâche AE asynchrone - ne bloque plus la loop principale
 void MipiDsiCam::ae_task_(void* param) {
   MipiDsiCam* cam = (MipiDsiCam*)param;
   AECommand cmd;
@@ -474,29 +460,57 @@ void MipiDsiCam::ae_task_(void* param) {
   ESP_LOGI(TAG, "AE task started");
   
   while (true) {
-    // Attendre une commande de la loop principale
     if (xQueueReceive(cam->ae_command_queue_, &cmd, portMAX_DELAY) == pdTRUE) {
       
-      // Exécuter les écritures I2C (lentes) ici
       if (cam->sensor_driver_) {
         cam->sensor_driver_->set_exposure(cmd.exposure);
-        vTaskDelay(pdMS_TO_TICKS(5));  // Laisser le temps au I2C
+        vTaskDelay(pdMS_TO_TICKS(5));
         cam->sensor_driver_->set_gain(cmd.gain);
       }
       
-      // Petit délai pour éviter de spammer le I2C
       vTaskDelay(pdMS_TO_TICKS(20));
     }
   }
 }
 
+// 🚀 VERSION OPTIMISÉE - Seulement 10 échantillons
+uint32_t MipiDsiCam::calculate_brightness_() {
+  if (!this->display_buffer_) {
+    return 128;
+  }
+  
+  uint32_t sum = 0;
+  
+  // 🔥 Seulement 10 échantillons au lieu de 50
+  uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
+  uint32_t stride = 2000;  // Stride plus grand
+  
+  for (int i = 0; i < 10; i++) {
+    uint32_t offset = center_offset + (i * stride);
+    if (offset + 1 < this->frame_buffer_size_) {
+      uint16_t pixel = (this->display_buffer_[offset + 1] << 8) | this->display_buffer_[offset];
+      
+      // Conversion RGB565 simplifiée
+      uint8_t r = ((pixel >> 11) & 0x1F) << 3;
+      uint8_t g = ((pixel >> 5) & 0x3F) << 2;
+      uint8_t b = (pixel & 0x1F) << 3;
+      
+      // Approximation rapide: (R*3 + G*6 + B) / 10
+      sum += (r * 3 + g * 6 + b) / 10;
+    }
+  }
+  
+  return sum / 10;
+}
+
+// 🚀 VERSION OPTIMISÉE - Intervalle 500ms au lieu de 200ms
 void MipiDsiCam::update_auto_exposure_() {
   if (!this->auto_exposure_enabled_ || !this->sensor_driver_) {
     return;
   }
   
   uint32_t now = millis();
-  // 🔥 CRITIQUE: Passer de 200ms à 500ms
+  // 🔥 CRITIQUE: 500ms au lieu de 200ms
   if (now - this->last_ae_update_ < 500) {
     return;
   }
@@ -505,7 +519,7 @@ void MipiDsiCam::update_auto_exposure_() {
   uint32_t avg_brightness = this->calculate_brightness_();
   int32_t error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
   
-  // 🔥 Seuil augmenté de 15 à 20
+  // 🔥 Seuil augmenté à 20
   if (abs(error) > 20) {
     bool changed = false;
     
@@ -534,41 +548,10 @@ void MipiDsiCam::update_auto_exposure_() {
   }
 }
 
-uint32_t MipiDsiCam::calculate_brightness_() {
-  if (!this->display_buffer_) {
-    return 128;
-  }
-  
-  uint32_t sum = 0;
-  
-  // 🔥 OPTIMISATION: Seulement 10 échantillons au lieu de 50
-  uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
-  uint32_t stride = 2000;  // Stride plus grand
-  
-  for (int i = 0; i < 10; i++) {
-    uint32_t offset = center_offset + (i * stride);
-    if (offset + 1 < this->frame_buffer_size_) {
-      uint16_t pixel = (this->display_buffer_[offset + 1] << 8) | this->display_buffer_[offset];
-      
-      // Conversion RGB565 simplifiée
-      uint8_t r = ((pixel >> 11) & 0x1F) << 3;
-      uint8_t g = ((pixel >> 5) & 0x3F) << 2;
-      uint8_t b = (pixel & 0x1F) << 3;
-      
-      // Approximation rapide: (R*3 + G*6 + B) / 10
-      sum += (r * 3 + g * 6 + b) / 10;
-    }
-  }
-  
-  return sum / 10;
-}
-
 void MipiDsiCam::loop() {
   if (this->streaming_) {
-    // AE non-bloquante
     this->update_auto_exposure_();
     
-    // Stats toutes les 3s
     uint32_t now = millis();
     if (now - this->last_frame_log_time_ >= 3000) {
       float fps = this->total_frames_received_ / 3.0f;
@@ -595,7 +578,6 @@ void MipiDsiCam::dump_config() {
   ESP_LOGCONFIG(TAG, "  Config: sc202cs_params.h");
 }
 
-// Méthodes publiques de contrôle
 void MipiDsiCam::set_auto_exposure(bool enabled) {
   this->auto_exposure_enabled_ = enabled;
   ESP_LOGI(TAG, "Auto Exposure: %s", enabled ? "ON" : "OFF");
