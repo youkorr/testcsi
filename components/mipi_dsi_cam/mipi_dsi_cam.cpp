@@ -496,8 +496,8 @@ void MipiDsiCam::update_auto_exposure_() {
   }
   
   uint32_t now = millis();
-  // 🔥 CRITIQUE: Passer de 200ms à 500ms pour réduire la charge
-  if (now - this->last_ae_update_ < 500) {  // Au lieu de sc202cs_params::AE_UPDATE_INTERVAL_MS
+  // 🔥 CRITIQUE: Passer de 200ms à 500ms
+  if (now - this->last_ae_update_ < 500) {
     return;
   }
   this->last_ae_update_ = now;
@@ -505,12 +505,11 @@ void MipiDsiCam::update_auto_exposure_() {
   uint32_t avg_brightness = this->calculate_brightness_();
   int32_t error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
   
-  // 🔥 Augmenter le seuil pour éviter les ajustements trop fréquents
-  if (abs(error) > 20) {  // Au lieu de sc202cs_params::AE_ADJUSTMENT_THRESHOLD (15)
+  // 🔥 Seuil augmenté de 15 à 20
+  if (abs(error) > 20) {
     bool changed = false;
     
     if (error > 0) {
-      // Image trop sombre
       if (this->current_exposure_ < sc202cs_params::MAX_EXPOSURE) {
         this->current_exposure_ += sc202cs_params::AE_EXPOSURE_STEP;
         changed = true;
@@ -519,7 +518,6 @@ void MipiDsiCam::update_auto_exposure_() {
         changed = true;
       }
     } else {
-      // Image trop lumineuse
       if (this->current_exposure_ > sc202cs_params::MIN_EXPOSURE) {
         this->current_exposure_ -= sc202cs_params::AE_EXPOSURE_STEP;
         changed = true;
@@ -529,10 +527,9 @@ void MipiDsiCam::update_auto_exposure_() {
       }
     }
     
-    // Envoyer commande à la tâche AE asynchrone
     if (changed && this->ae_command_queue_) {
       AECommand cmd = {this->current_exposure_, this->current_gain_index_};
-      xQueueSend(this->ae_command_queue_, &cmd, 0);  // Non-bloquant
+      xQueueSend(this->ae_command_queue_, &cmd, 0);
     }
   }
 }
@@ -544,23 +541,21 @@ uint32_t MipiDsiCam::calculate_brightness_() {
   
   uint32_t sum = 0;
   
-  // 🔥 OPTIMISATION: Seulement 10 échantillons au lieu de 50 !
-  // Stride beaucoup plus grand pour réduire les accès mémoire
+  // 🔥 OPTIMISATION: Seulement 10 échantillons au lieu de 50
   uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
-  uint32_t stride = 2000;  // Échantillonner tous les 1000 pixels
+  uint32_t stride = 2000;  // Stride plus grand
   
   for (int i = 0; i < 10; i++) {
     uint32_t offset = center_offset + (i * stride);
     if (offset + 1 < this->frame_buffer_size_) {
       uint16_t pixel = (this->display_buffer_[offset + 1] << 8) | this->display_buffer_[offset];
       
-      // Conversion RGB565 -> luminosité simplifiée
-      // Formule approximative plus rapide: (R*3 + G*6 + B) / 10
-      uint8_t r = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
-      uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
-      uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
+      // Conversion RGB565 simplifiée
+      uint8_t r = ((pixel >> 11) & 0x1F) << 3;
+      uint8_t g = ((pixel >> 5) & 0x3F) << 2;
+      uint8_t b = (pixel & 0x1F) << 3;
       
-      // Approximation rapide de Y = 0.299R + 0.587G + 0.114B
+      // Approximation rapide: (R*3 + G*6 + B) / 10
       sum += (r * 3 + g * 6 + b) / 10;
     }
   }
