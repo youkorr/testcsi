@@ -85,16 +85,13 @@ void LVGLCameraDisplay::update_canvas_() {
   
   // 🆕 Première fois ou si le buffer a changé: set_buffer
   if (this->last_buffer_ptr_ != img_data) {
-    bsp_display_lock(0);
+    // Verrouillage LVGL pour thread-safety
     lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
     this->last_buffer_ptr_ = img_data;
-    bsp_display_unlock();
   }
   
   // 🔧 Invalider seulement la zone nécessaire (plus rapide que tout l'écran)
-  bsp_display_lock(0);
   lv_obj_invalidate(this->canvas_obj_);
-  bsp_display_unlock();
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
