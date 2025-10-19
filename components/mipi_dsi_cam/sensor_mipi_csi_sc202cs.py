@@ -1,6 +1,8 @@
-import json
-import os
+"""
+Driver SC202CS - Utilise les paramètres de sc202cs_params.h
+"""
 
+# Info du capteur (ne pas modifier)
 SENSOR_INFO = {
     'name': 'sc202cs',
     'manufacturer': 'SmartSens',
@@ -14,6 +16,7 @@ SENSOR_INFO = {
     'fps': 30,
 }
 
+# Registres du capteur
 REGISTERS = {
     'sensor_id_h': 0x3107,
     'sensor_id_l': 0x3108,
@@ -25,7 +28,6 @@ REGISTERS = {
     'exposure_m': 0x3e01,
     'exposure_l': 0x3e02,
     'flip_mirror': 0x3221,
-    # AWB registers
     'awb_gain_r_h': 0x3c00,
     'awb_gain_r_l': 0x3c01,
     'awb_gain_g_h': 0x3c02,
@@ -34,59 +36,8 @@ REGISTERS = {
     'awb_gain_b_l': 0x3c05,
 }
 
-# Charger les paramètres depuis le fichier JSON si disponible
-def load_config():
-    config = {}
-    try:
-        # Chercher le fichier JSON dans le même répertoire
-        json_path = os.path.join(os.path.dirname(__file__), 'sc202cs_default.json')
-        if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
-                data = json.load(f)
-                if 'SC202CS' in data:
-                    config = data['SC202CS']
-                    print(f"Loaded SC202CS config from {json_path}")
-    except Exception as e:
-        print(f"Could not load JSON config: {e}")
-    return config
-
-CONFIG = load_config()
-
-# Extraire les paramètres importants du JSON
-AWB_CONFIG = CONFIG.get('awb', {})
-AGC_CONFIG = CONFIG.get('agc', {})
-ACC_CONFIG = CONFIG.get('acc', {})
-
-# Matrice CCM par défaut ou depuis le JSON
-CCM_MATRIX = [1.408, -0.094, -0.314,
-              -0.13,  1.28,  -0.15,
-              -0.072, -0.173, 1.245]
-
-if ACC_CONFIG and 'ccm' in ACC_CONFIG and 'table' in ACC_CONFIG['ccm']:
-    ccm_table = ACC_CONFIG['ccm']['table']
-    if ccm_table and len(ccm_table) > 0:
-        CCM_MATRIX = ccm_table[0].get('matrix', CCM_MATRIX)
-
-# Paramètres AWB depuis le JSON
-AWB_TARGET_RG_MIN = 0.573
-AWB_TARGET_RG_MAX = 0.9096
-AWB_TARGET_BG_MIN = 0.5368
-AWB_TARGET_BG_MAX = 0.9634
-
-if AWB_CONFIG and 'range' in AWB_CONFIG:
-    range_config = AWB_CONFIG['range']
-    if 'rg' in range_config:
-        AWB_TARGET_RG_MIN = range_config['rg'].get('min', AWB_TARGET_RG_MIN)
-        AWB_TARGET_RG_MAX = range_config['rg'].get('max', AWB_TARGET_RG_MAX)
-    if 'bg' in range_config:
-        AWB_TARGET_BG_MIN = range_config['bg'].get('min', AWB_TARGET_BG_MIN)
-        AWB_TARGET_BG_MAX = range_config['bg'].get('max', AWB_TARGET_BG_MAX)
-
-# Target luma pour AGC depuis le JSON
-AGC_TARGET_LUMA = 65
-if AGC_CONFIG and 'luma_adjust' in AGC_CONFIG:
-    AGC_TARGET_LUMA = AGC_CONFIG['luma_adjust'].get('target', AGC_TARGET_LUMA)
-
+# Séquence d'initialisation
+# L'exposition et le gain seront appliqués depuis sc202cs_params.h
 INIT_SEQUENCE = [
     (0x0103, 0x01, 10),
     (0x0100, 0x00, 10),
@@ -212,21 +163,18 @@ INIT_SEQUENCE = [
     (0x393d, 0x01, 0),
     (0x393e, 0xc0, 0),
     (0x39dd, 0x41, 0),
-    # Exposition initiale basée sur le JSON si disponible
-    (0x3e00, 0x00, 0),
-    (0x3e01, 0x4d, 0),  # 0x9C0 = exposition moyenne
-    (0x3e02, 0x00, 0),
-    # Gain initial modéré
-    (0x3e07, 0xa0, 0),  # digital fine
-    (0x3e06, 0x00, 0),  # digital coarse
-    (0x3e09, 0x00, 0),  # analog
+    # Exposition et gain seront appliqués par le code depuis sc202cs_params.h
+    (0x3e00, 0x00, 0),  # Placeholder
+    (0x3e01, 0x00, 0),  # Placeholder
+    (0x3e02, 0x00, 0),  # Placeholder
+    (0x3e07, 0xa0, 0),
+    (0x3e06, 0x00, 0),
+    (0x3e09, 0x00, 0),
     (0x4509, 0x28, 0),
     (0x450d, 0x61, 0),
-    (0x3e06, 0x00, 0),
-    (0x3e06, 0x00, 0),
 ]
 
-# Tables de gain (identiques à avant)
+# Table de gain (identique)
 GAIN_VALUES = [
     1000, 1031, 1063, 1094, 1125, 1156, 1188, 1219,
     1250, 1281, 1313, 1344, 1375, 1406, 1438, 1469,
@@ -256,7 +204,7 @@ GAIN_VALUES = [
 
 GAIN_REGISTERS = [
     (0x80, 0x00, 0x00), (0x84, 0x00, 0x00), (0x88, 0x00, 0x00), (0x8c, 0x00, 0x00),
-    (0x90, 0x00, 0x00), (0x94, 0x00, 0x00), (0x98, 0x00, 0x00), (0x4d, 0x00, 0x00),
+    (0x90, 0x00, 0x00), (0x94, 0x00, 0x00), (0x98, 0x00, 0x00), (0x9c, 0x00, 0x00),
     (0xa0, 0x00, 0x00), (0xa4, 0x00, 0x00), (0xa8, 0x00, 0x00), (0xac, 0x00, 0x00),
     (0xb0, 0x00, 0x00), (0xb4, 0x00, 0x00), (0xb8, 0x00, 0x00), (0xbc, 0x00, 0x00),
     (0xc0, 0x00, 0x00), (0xc4, 0x00, 0x00), (0xc8, 0x00, 0x00), (0xcc, 0x00, 0x00),
@@ -264,7 +212,7 @@ GAIN_REGISTERS = [
     (0xe0, 0x00, 0x00), (0xe4, 0x00, 0x00), (0xe8, 0x00, 0x00), (0xec, 0x00, 0x00),
     (0xf0, 0x00, 0x00), (0xf4, 0x00, 0x00), (0xf8, 0x00, 0x00), (0xfc, 0x00, 0x00),
     (0x80, 0x01, 0x00), (0x84, 0x01, 0x00), (0x88, 0x01, 0x00), (0x8c, 0x01, 0x00),
-    (0x90, 0x01, 0x00), (0x94, 0x01, 0x00), (0x98, 0x01, 0x00), (0x4d, 0x01, 0x00),
+    (0x90, 0x01, 0x00), (0x94, 0x01, 0x00), (0x98, 0x01, 0x00), (0x9c, 0x01, 0x00),
     (0xa0, 0x01, 0x00), (0xa4, 0x01, 0x00), (0xa8, 0x01, 0x00), (0xac, 0x01, 0x00),
     (0xb0, 0x01, 0x00), (0xb4, 0x01, 0x00), (0xb8, 0x01, 0x00), (0xbc, 0x01, 0x00),
     (0xc0, 0x01, 0x00), (0xc4, 0x01, 0x00), (0xc8, 0x01, 0x00), (0xcc, 0x01, 0x00),
@@ -272,7 +220,7 @@ GAIN_REGISTERS = [
     (0xe0, 0x01, 0x00), (0xe4, 0x01, 0x00), (0xe8, 0x01, 0x00), (0xec, 0x01, 0x00),
     (0xf0, 0x01, 0x00), (0xf4, 0x01, 0x00), (0xf8, 0x01, 0x00), (0xfc, 0x01, 0x00),
     (0x80, 0x01, 0x01), (0x84, 0x01, 0x01), (0x88, 0x01, 0x01), (0x8c, 0x01, 0x01),
-    (0x90, 0x01, 0x01), (0x94, 0x01, 0x01), (0x98, 0x01, 0x01), (0x4d, 0x01, 0x01),
+    (0x90, 0x01, 0x01), (0x94, 0x01, 0x01), (0x98, 0x01, 0x01), (0x9c, 0x01, 0x01),
     (0xa0, 0x01, 0x01), (0xa4, 0x01, 0x01), (0xa8, 0x01, 0x01), (0xac, 0x01, 0x01),
     (0xb0, 0x01, 0x01), (0xb4, 0x01, 0x01), (0xb8, 0x01, 0x01), (0xbc, 0x01, 0x01),
     (0xc0, 0x01, 0x01), (0xc4, 0x01, 0x01), (0xc8, 0x01, 0x01), (0xcc, 0x01, 0x01),
@@ -280,7 +228,7 @@ GAIN_REGISTERS = [
     (0xe0, 0x01, 0x01), (0xe4, 0x01, 0x01), (0xe8, 0x01, 0x01), (0xec, 0x01, 0x01),
     (0xf0, 0x01, 0x01), (0xf4, 0x01, 0x01), (0xf8, 0x01, 0x01), (0xfc, 0x01, 0x01),
     (0x80, 0x01, 0x03), (0x84, 0x01, 0x03), (0x88, 0x01, 0x03), (0x8c, 0x01, 0x03),
-    (0x90, 0x01, 0x03), (0x94, 0x01, 0x03), (0x98, 0x01, 0x03), (0x4d, 0x01, 0x03),
+    (0x90, 0x01, 0x03), (0x94, 0x01, 0x03), (0x98, 0x01, 0x03), (0x9c, 0x01, 0x03),
     (0xa0, 0x01, 0x03), (0xa4, 0x01, 0x03), (0xa8, 0x01, 0x03), (0xac, 0x01, 0x03),
     (0xb0, 0x01, 0x03), (0xb4, 0x01, 0x03), (0xb8, 0x01, 0x03), (0xbc, 0x01, 0x03),
     (0xc0, 0x01, 0x03), (0xc4, 0x01, 0x03), (0xc8, 0x01, 0x03), (0xcc, 0x01, 0x03),
@@ -288,7 +236,7 @@ GAIN_REGISTERS = [
     (0xe0, 0x01, 0x03), (0xe4, 0x01, 0x03), (0xe8, 0x01, 0x03), (0xec, 0x01, 0x03),
     (0xf0, 0x01, 0x03), (0xf4, 0x01, 0x03), (0xf8, 0x01, 0x03), (0xfc, 0x01, 0x03),
     (0x80, 0x01, 0x07), (0x84, 0x01, 0x07), (0x88, 0x01, 0x07), (0x8c, 0x01, 0x07),
-    (0x90, 0x01, 0x07), (0x94, 0x01, 0x07), (0x98, 0x01, 0x07), (0x4d, 0x01, 0x07),
+    (0x90, 0x01, 0x07), (0x94, 0x01, 0x07), (0x98, 0x01, 0x07), (0x9c, 0x01, 0x07),
     (0xa0, 0x01, 0x07), (0xa4, 0x01, 0x07), (0xa8, 0x01, 0x07), (0xac, 0x01, 0x07),
     (0xb0, 0x01, 0x07), (0xb4, 0x01, 0x07), (0xb8, 0x01, 0x07), (0xbc, 0x01, 0x07),
     (0xc0, 0x01, 0x07), (0xc4, 0x01, 0x07), (0xc8, 0x01, 0x07), (0xcc, 0x01, 0x07),
@@ -296,7 +244,7 @@ GAIN_REGISTERS = [
     (0xe0, 0x01, 0x07), (0xe4, 0x01, 0x07), (0xe8, 0x01, 0x07), (0xec, 0x01, 0x07),
     (0xf0, 0x01, 0x07), (0xf4, 0x01, 0x07), (0xf8, 0x01, 0x07), (0xfc, 0x01, 0x07),
     (0x80, 0x01, 0x0f), (0x84, 0x01, 0x0f), (0x88, 0x01, 0x0f), (0x8c, 0x01, 0x0f),
-    (0x90, 0x01, 0x0f), (0x94, 0x01, 0x0f), (0x98, 0x01, 0x0f), (0x4d, 0x01, 0x0f),
+    (0x90, 0x01, 0x0f), (0x94, 0x01, 0x0f), (0x98, 0x01, 0x0f), (0x9c, 0x01, 0x0f),
     (0xa0, 0x01, 0x0f), (0xa4, 0x01, 0x0f), (0xa8, 0x01, 0x0f), (0xac, 0x01, 0x0f),
     (0xb0, 0x01, 0x0f), (0xb4, 0x01, 0x0f), (0xb8, 0x01, 0x0f), (0xbc, 0x01, 0x0f),
     (0xc0, 0x01, 0x0f), (0xc4, 0x01, 0x0f), (0xc8, 0x01, 0x0f), (0xcc, 0x01, 0x0f),
@@ -307,6 +255,9 @@ GAIN_REGISTERS = [
 
 def generate_driver_cpp():
     cpp_code = f'''
+// 🔥 Ce driver utilise les paramètres de sc202cs_params.h
+#include "sc202cs_params.h"
+
 namespace esphome {{
 namespace mipi_dsi_cam {{
 
@@ -318,24 +269,6 @@ namespace {SENSOR_INFO['name']}_regs {{
     
     cpp_code += f'''
 }}
-
-// Paramètres AWB depuis le fichier JSON
-struct SC202CSAWBConfig {{
-    float rg_min = {AWB_TARGET_RG_MIN}f;
-    float rg_max = {AWB_TARGET_RG_MAX}f;
-    float bg_min = {AWB_TARGET_BG_MIN}f;
-    float bg_max = {AWB_TARGET_BG_MAX}f;
-}};
-
-// Matrice de correction des couleurs depuis le JSON
-static const float sc202cs_ccm_matrix[9] = {{
-    {CCM_MATRIX[0]}f, {CCM_MATRIX[1]}f, {CCM_MATRIX[2]}f,
-    {CCM_MATRIX[3]}f, {CCM_MATRIX[4]}f, {CCM_MATRIX[5]}f,
-    {CCM_MATRIX[6]}f, {CCM_MATRIX[7]}f, {CCM_MATRIX[8]}f
-}};
-
-// Target luma pour AGC
-static const uint8_t SC202CS_AGC_TARGET_LUMA = {AGC_TARGET_LUMA};
 
 struct {SENSOR_INFO['name'].upper()}InitRegister {{
     uint16_t addr;
@@ -372,18 +305,14 @@ public:
     {SENSOR_INFO['name'].upper()}Driver(esphome::i2c::I2CDevice* i2c) : i2c_(i2c) {{}}
     
     esp_err_t init() {{
-        ESP_LOGI(TAG, "Init {SENSOR_INFO['name'].upper()} avec paramètres JSON");
-        ESP_LOGI(TAG, "  CCM Matrix: %.3f %.3f %.3f", 
-                 sc202cs_ccm_matrix[0], sc202cs_ccm_matrix[1], sc202cs_ccm_matrix[2]);
-        ESP_LOGI(TAG, "              %.3f %.3f %.3f", 
-                 sc202cs_ccm_matrix[3], sc202cs_ccm_matrix[4], sc202cs_ccm_matrix[5]);
-        ESP_LOGI(TAG, "              %.3f %.3f %.3f", 
-                 sc202cs_ccm_matrix[6], sc202cs_ccm_matrix[7], sc202cs_ccm_matrix[8]);
-        ESP_LOGI(TAG, "  AWB Range: RG[%.3f-%.3f] BG[%.3f-%.3f]", 
-                 awb_config_.rg_min, awb_config_.rg_max,
-                 awb_config_.bg_min, awb_config_.bg_max);
-        ESP_LOGI(TAG, "  AGC Target Luma: %d", SC202CS_AGC_TARGET_LUMA);
+        using namespace sc202cs_params;
         
+        ESP_LOGI(TAG, "Init {SENSOR_INFO['name'].upper()} with custom params");
+        ESP_LOGI(TAG, "  Default Exposure: 0x%04X (%d)", DEFAULT_EXPOSURE, DEFAULT_EXPOSURE);
+        ESP_LOGI(TAG, "  Default Gain Index: %d", DEFAULT_GAIN_INDEX);
+        ESP_LOGI(TAG, "  WB: R=%.2f G=%.2f B=%.2f", WB_RED_GAIN, WB_GREEN_GAIN, WB_BLUE_GAIN);
+        
+        // Init sequence
         for (size_t i = 0; i < sizeof({SENSOR_INFO['name']}_init_sequence) / sizeof({SENSOR_INFO['name'].upper()}InitRegister); i++) {{
             const auto& reg = {SENSOR_INFO['name']}_init_sequence[i];
             
@@ -398,7 +327,18 @@ public:
             }}
         }}
         
-        ESP_LOGI(TAG, "✅ {SENSOR_INFO['name'].upper()} initialized with JSON config");
+        // 🔥 Appliquer exposition par défaut depuis params
+        uint8_t exp_h = (DEFAULT_EXPOSURE >> 12) & 0x0F;
+        uint8_t exp_m = (DEFAULT_EXPOSURE >> 4) & 0xFF;
+        uint8_t exp_l = (DEFAULT_EXPOSURE & 0x0F) << 4;
+        
+        write_register({SENSOR_INFO['name']}_regs::EXPOSURE_H, exp_h);
+        write_register({SENSOR_INFO['name']}_regs::EXPOSURE_M, exp_m);
+        write_register({SENSOR_INFO['name']}_regs::EXPOSURE_L, exp_l);
+        
+        ESP_LOGI(TAG, "  Applied exposure: H=0x%02X M=0x%02X L=0x%02X", exp_h, exp_m, exp_l);
+        
+        ESP_LOGI(TAG, "✅ {SENSOR_INFO['name'].upper()} initialized");
         return ESP_OK;
     }}
     
@@ -455,29 +395,6 @@ public:
         return ret;
     }}
     
-    // Nouvelle méthode pour ajuster la balance des blancs
-    esp_err_t set_awb_gains(uint16_t r_gain, uint16_t g_gain, uint16_t b_gain) {{
-        esp_err_t ret = ESP_OK;
-        
-        // Écrire les gains R/G/B dans les registres AWB
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_R_H, (r_gain >> 8) & 0xFF);
-        if (ret != ESP_OK) return ret;
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_R_L, r_gain & 0xFF);
-        if (ret != ESP_OK) return ret;
-        
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_G_H, (g_gain >> 8) & 0xFF);
-        if (ret != ESP_OK) return ret;
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_G_L, g_gain & 0xFF);
-        if (ret != ESP_OK) return ret;
-        
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_B_H, (b_gain >> 8) & 0xFF);
-        if (ret != ESP_OK) return ret;
-        ret = write_register({SENSOR_INFO['name']}_regs::AWB_GAIN_B_L, b_gain & 0xFF);
-        
-        ESP_LOGV(TAG, "AWB gains set: R=%d G=%d B=%d", r_gain, g_gain, b_gain);
-        return ret;
-    }}
-    
     esp_err_t write_register(uint16_t reg, uint8_t value) {{
         uint8_t data[3] = {{
             static_cast<uint8_t>((reg >> 8) & 0xFF),
@@ -501,21 +418,15 @@ public:
         
         auto err = i2c_->write_read(addr, 2, value, 1);
         if (err != esphome::i2c::ERROR_OK) {{
-            ESP_LOGE(TAG, "I2C cmd failed for reg 0x%04X", reg);
+            ESP_LOGE(TAG, "I2C read failed for reg 0x%04X", reg);
             return ESP_FAIL;
         }}
         
         return ESP_OK;
     }}
     
-    // Getters pour les paramètres AWB
-    const SC202CSAWBConfig& get_awb_config() const {{ return awb_config_; }}
-    const float* get_ccm_matrix() const {{ return sc202cs_ccm_matrix; }}
-    uint8_t get_agc_target_luma() const {{ return SC202CS_AGC_TARGET_LUMA; }}
-    
 private:
     esphome::i2c::I2CDevice* i2c_;
-    SC202CSAWBConfig awb_config_;
     static constexpr const char* TAG = "{SENSOR_INFO['name'].upper()}";
 }};
 
@@ -523,7 +434,7 @@ class {SENSOR_INFO['name'].upper()}Adapter : public ISensorDriver {{
 public:
     {SENSOR_INFO['name'].upper()}Adapter(i2c::I2CDevice* i2c) : driver_(i2c) {{}}
     
-    const char* get_name() const override {{ return "{SENSOR_INFO['name']} (JSON config)"; }}
+    const char* get_name() const override {{ return "{SENSOR_INFO['name']} (custom params)"; }}
     uint16_t get_pid() const override {{ return 0x{SENSOR_INFO['pid']:04X}; }}
     uint8_t get_i2c_address() const override {{ return 0x{SENSOR_INFO['i2c_address']:02X}; }}
     uint8_t get_lane_count() const override {{ return {SENSOR_INFO['lane_count']}; }}
