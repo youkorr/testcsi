@@ -496,7 +496,8 @@ void MipiDsiCam::update_auto_exposure_() {
   }
   
   uint32_t now = millis();
-  if (now - this->last_ae_update_ < sc202cs_params::AE_UPDATE_INTERVAL_MS) {  // 🔥 Depuis params
+  // 🔥 CRITIQUE: Passer de 200ms à 500ms pour réduire la charge
+  if (now - this->last_ae_update_ < 500) {  // Au lieu de sc202cs_params::AE_UPDATE_INTERVAL_MS
     return;
   }
   this->last_ae_update_ = now;
@@ -504,16 +505,17 @@ void MipiDsiCam::update_auto_exposure_() {
   uint32_t avg_brightness = this->calculate_brightness_();
   int32_t error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
   
-  if (abs(error) > sc202cs_params::AE_ADJUSTMENT_THRESHOLD) {  // 🔥 Depuis params
+  // 🔥 Augmenter le seuil pour éviter les ajustements trop fréquents
+  if (abs(error) > 20) {  // Au lieu de sc202cs_params::AE_ADJUSTMENT_THRESHOLD (15)
     bool changed = false;
     
     if (error > 0) {
       // Image trop sombre
       if (this->current_exposure_ < sc202cs_params::MAX_EXPOSURE) {
-        this->current_exposure_ += sc202cs_params::AE_EXPOSURE_STEP;  // 🔥 Depuis params
+        this->current_exposure_ += sc202cs_params::AE_EXPOSURE_STEP;
         changed = true;
       } else if (this->current_gain_index_ < sc202cs_params::MAX_GAIN_INDEX) {
-        this->current_gain_index_ += sc202cs_params::AE_GAIN_STEP;  // 🔥 Depuis params
+        this->current_gain_index_ += sc202cs_params::AE_GAIN_STEP;
         changed = true;
       }
     } else {
@@ -527,7 +529,7 @@ void MipiDsiCam::update_auto_exposure_() {
       }
     }
     
-    // Envoyer commande à la tâche AE asynchrone au lieu de bloquer
+    // Envoyer commande à la tâche AE asynchrone
     if (changed && this->ae_command_queue_) {
       AECommand cmd = {this->current_exposure_, this->current_gain_index_};
       xQueueSend(this->ae_command_queue_, &cmd, 0);  // Non-bloquant
@@ -541,26 +543,29 @@ uint32_t MipiDsiCam::calculate_brightness_() {
   }
   
   uint32_t sum = 0;
-  uint32_t count = 0;
   
-  // Échantillonner au centre
+  // 🔥 OPTIMISATION: Seulement 10 échantillons au lieu de 50 !
+  // Stride beaucoup plus grand pour réduire les accès mémoire
   uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
+  uint32_t stride = 2000;  // Échantillonner tous les 1000 pixels
   
-  for (int i = 0; i < 50; i++) {  // Réduit de 100 à 50 échantillons
-    uint32_t offset = center_offset + (i * 400);
+  for (int i = 0; i < 10; i++) {
+    uint32_t offset = center_offset + (i * stride);
     if (offset + 1 < this->frame_buffer_size_) {
       uint16_t pixel = (this->display_buffer_[offset + 1] << 8) | this->display_buffer_[offset];
       
-      uint8_t r = (pixel >> 11) & 0x1F;
-      uint8_t g = (pixel >> 5) & 0x3F;
-      uint8_t b = pixel & 0x1F;
+      // Conversion RGB565 -> luminosité simplifiée
+      // Formule approximative plus rapide: (R*3 + G*6 + B) / 10
+      uint8_t r = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
+      uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
+      uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
       
-      sum += (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
-      count++;
+      // Approximation rapide de Y = 0.299R + 0.587G + 0.114B
+      sum += (r * 3 + g * 6 + b) / 10;
     }
   }
   
-  return count > 0 ? (sum / count) : 128;
+  return sum / 10;
 }
 
 void MipiDsiCam::loop() {
