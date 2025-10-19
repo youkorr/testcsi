@@ -242,7 +242,7 @@ bool MipiDsiCam::init_isp_() {
   isp_config.clk_src = ISP_CLK_SRC_DEFAULT;
   isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
   isp_config.input_data_color_type = ISP_COLOR_RAW8;
-  isp_config.output_data_color_type = ISP_COLOR_RGB565;
+  isp_config.output_data_color_type = ISP_COLOR_RAW8;
   isp_config.h_res = this->width_;
   isp_config.v_res = this->height_;
   isp_config.has_line_start_packet = false;
