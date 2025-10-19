@@ -135,8 +135,8 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   ISensorDriver *sensor_driver_{nullptr};
 
   // Auto Exposure - déporté dans une tâche séparée
-  bool auto_exposure_enabled_{true};
-  uint16_t current_exposure_{0x4dc};  // Sera init depuis sc202cs_params
+  bool auto_exposure_enabled_{false};
+  uint16_t current_exposure_{0x07DC};  // Sera init depuis sc202cs_params
   uint8_t current_gain_index_{0};     // Sera init depuis sc202cs_params
   uint32_t ae_target_brightness_{128}; // Sera init depuis sc202cs_params
   uint32_t last_ae_update_{0};
