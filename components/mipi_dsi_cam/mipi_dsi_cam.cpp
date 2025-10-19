@@ -541,20 +541,10 @@ void MipiDsiCam::apply_software_ccm_(uint8_t* buffer, size_t size) {
 }
 
 void MipiDsiCam::loop() {
-  if (!this->streaming_) {
-    return;
-  }
-  
-  // Réduire la fréquence des mises à jour pour libérer du CPU
-  this->loop_counter_++;
-  
-  // Auto Exposure - mise à jour toutes les 10 loops seulement
-  if (this->loop_counter_ % 10 == 0) {
+  if (this->streaming_) {
+    // Mise à jour Auto Exposure
     this->update_auto_exposure_();
-  }
-  
-  // Statistiques FPS - toutes les 100 loops
-  if (this->loop_counter_ % 100 == 0) {
+    
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
     
@@ -563,6 +553,22 @@ void MipiDsiCam::loop() {
     } else {
       not_ready_count++;
     }
+    
+    uint32_t now = millis();
+    if (now - this->last_frame_log_time_ >= 3000) {
+      float sensor_fps = this->total_frames_received_ / 3.0f;
+      float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
+      
+      ESP_LOGI(TAG, "📸 FPS: %.1f | frame_ready: %.1f%% | exp:0x%04X gain:%u", 
+               sensor_fps, ready_rate, this->current_exposure_, this->current_gain_index_);
+      
+      this->total_frames_received_ = 0;
+      this->last_frame_log_time_ = now;
+      ready_count = 0;
+      not_ready_count = 0;
+    }
+  }
+}
     
     uint32_t now = millis();
     if (now - this->last_frame_log_time_ >= 3000) {
