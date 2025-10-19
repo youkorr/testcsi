@@ -135,7 +135,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
 
   // Auto Exposure - déporté dans une tâche séparée
   bool auto_exposure_enabled_{true};
-  uint16_t current_exposure_{0x9C0};
+  uint16_t current_exposure_{0x4d};
   uint8_t current_gain_index_{20};
   uint32_t ae_target_brightness_{128};
   uint32_t last_ae_update_{0};
@@ -150,8 +150,8 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   
   // White Balance correction
   float wb_red_gain_{1.3f};
-  float wb_green_gain_{0.7f};
-  float wb_blue_gain_{1.1f};
+  float wb_green_gain_{0.5f};
+  float wb_blue_gain_{1.2f};
   
 #ifdef USE_ESP32_VARIANT_ESP32P4
   esp_cam_ctlr_handle_t csi_handle_{nullptr};
