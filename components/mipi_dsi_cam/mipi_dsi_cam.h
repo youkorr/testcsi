@@ -136,7 +136,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   // Auto Exposure - déporté dans une tâche séparée
   bool auto_exposure_enabled_{true};
   uint16_t current_exposure_{0x4d};
-  uint8_t current_gain_index_{20};
+  uint8_t current_gain_index_{10};
   uint32_t ae_target_brightness_{80};
   uint32_t last_ae_update_{0};
   
